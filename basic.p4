@@ -4,7 +4,6 @@
 
 const bit<16> TYPE_IPV4 = 0x800;
 /**
-2: This stands for "code for TTL decrease"
 */
 /*************************************************************************
 *********************** H E A D E R S  ***********************************
@@ -13,6 +12,7 @@ const bit<16> TYPE_IPV4 = 0x800;
 typedef bit<9>  egressSpec_t;
 typedef bit<48> macAddr_t;
 typedef bit<32> ip4Addr_t;
+const bit<48> DEFAULT_SWITCH_MAC = 0x112233445566; // Replace with actual MAC address
 
 header ethernet_t {
     macAddr_t dstAddr;
@@ -45,6 +45,9 @@ struct headers {
     ipv4_t       ipv4;
 }
 
+// Define switch MAC address with default value
+bit<48> switch_mac_address = DEFAULT_SWITCH_MAC;
+
 /*************************************************************************
 *********************** P A R S E R  ***********************************
 *************************************************************************/
@@ -55,23 +58,23 @@ parser MyParser(packet_in packet,
                 inout standard_metadata_t standard_metadata) {
 
     state start {
-        /* TODO: add parser logic DONE */
+        /* DONE: add parser logic */
 
-        // parse the Ethernet header from the packet_in input parameter into the hdr.ethernet header.
+        // Parse the Ethernet header from the packet_in input parameter into the hdr.ethernet header.
         packet.extract(hdr.ethernet);
-        // set the corresponding fields in the meta.ethernet metadata using the values extracted from the Ethernet header.
+        // Set the corresponding fields in the meta.ethernet metadata using the values extracted from the Ethernet header.
         meta.ethernet.dstAddr = hdr.ethernet.dstAddr;
         meta.ethernet.srcAddr = hdr.ethernet.srcAddr;
         meta.ethernet.etherType = hdr.ethernet.etherType;
 
-        // this is for decrement ttl
-        // 2: check packet is an IPv4 packet
+        // 2: Decrement ttl
+        // 2: Check packet is an IPv4 packet
         if (hdr.ethernet.etherType == 0x0800) {
-            // extract the IPv4 header fields from the packet and store them in the hdr.ipv4 struct. This makes the IPv4 header fields available for processing in the P4 program.
+            // Extract the IPv4 header fields from the packet and store them in the hdr.ipv4 struct. This makes the IPv4 header fields available for processing in the P4 program.
             extract(hdr.ipv4);
         }
 
-        // we transition to the accept state to indicate that the parser has successfully parsed the Ethernet header.
+        // Transition to the accept state to indicate that the parser has successfully parsed the Ethernet header.
         transition accept;
     }
     
@@ -98,30 +101,19 @@ control MyIngress(inout headers hdr,
         mark_to_drop();
     }
     
-    /* TODO: fill out code in action body DONE*/
+    /* DONE: fill out code in action body*/
     action ipv4_forward(macAddr_t dstAddr, egressSpec_t port) {
-        // check the meta.l3_metadata.nextHop field to see if the next hop for the packet is known
-        if (meta.l3_metadata.nextHop == 0) {
-            /* Next hop is not known, drop the packet */
-            drop();
-        } else {
-	    // update the ethernet destination address with the address of the next hop
-            modify_field(hdr.ethernet.dstAddr, dstAddr);
-            
-	    // updates the source MAC address in the Ethernet header to the MAC address of the egress port
-            // modify_field(hdr.ethernet.srcAddr, standard_metadata.ingress_port);
-            //  Q: OR :  hdr.ethernet.srcAddr = standard_metadata.ingress_port; // Update source MAC address
-            // q:     modify_field(hdr.ethernet.srcAddr, switch_mac_address);
-            
+        // i. Set the egress port for the next hop
+        modify_field(standard_metadata.egress_spec, port);
 
-            // update the ethernet source address with the address of the switch
-            modify_field(hdr.ethernet.srcAddr, switch_mac_address);
+        // ii. Update the Ethernet destination address with the address of the next hop.
+        modify_field(hdr.ethernet.dstAddr, dstAddr);
 
-            // set the egress port for the next hop
-            modify_field(standard_metadata.egress_spec, port);
-        }
+        // iii. Update the ethernet source address with the address of the switch
+        modify_field(hdr.ethernet.srcAddr, switch_mac_address); // :Q switch_mac_address ?
 
-         // 2: decrements the ttl field in the IPv4 header by 1. 
+
+         // iv: Decrements the ttl field in the IPv4 header by 1. 
          // Check if TTL is greater than 0
          if (hdr.ipv4.ttl > 0) {
             // Decrement TTL by 1
@@ -147,18 +139,17 @@ control MyIngress(inout headers hdr,
     
     /* Forward the packet */
     apply {
-        /* TODO: fix ingress control logic
+        /* DONE: fix ingress control logic
          *  - ipv4_lpm should be applied only when IPv4 header is valid
          *
-         DONE
          */
 
         if (hdr.ipv4.isValid() && hdr.ipv4.protocol == TYPE_IPV4) { // OR hdr.ethernet.etherType == 0x0800
             ipv4_lpm.apply();
         } else {
-            drop();
         }
     }
+    drop();
 }
 
 /*************************************************************************
@@ -201,17 +192,23 @@ control MyComputeChecksum(inout headers hdr, inout metadata meta) {
 *************************************************************************/
 
 control MyDeparser(packet_out packet, in headers hdr) {
+
+    // Define the order in which fields are inserted into the outgoing packet
+
     apply {
-        /* TODO: add deparser logic DONE */
-        
-        // Deparse Ethernet header
-        deparse(hdr.ethernet);
-
-
-        //2: Deparse IPv4 header
+        /* DONE: add deparser logic */
+        packet.emit(hdr.ethernet);
         if (hdr.ipv4.isValid()) {
-            deparse(hdr.ipv4);
+            packet.emit(hdr.ipv4);
         }
+
+        // // OR 
+        // // Deparse Ethernet header
+        // deparse(hdr.ethernet);
+        // // Deparse IPv4 header
+        // if (hdr.ipv4.isValid()) {
+        //     deparse(hdr.ipv4);
+        // }
     }
 }
 
