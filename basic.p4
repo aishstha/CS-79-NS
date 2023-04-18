@@ -3,7 +3,9 @@
 #include <v1model.p4>
 
 const bit<16> TYPE_IPV4 = 0x800;
-
+/**
+2: This stands for "code for TTL decrease"
+*/
 /*************************************************************************
 *********************** H E A D E R S  ***********************************
 *************************************************************************/
@@ -61,6 +63,14 @@ parser MyParser(packet_in packet,
         meta.ethernet.dstAddr = hdr.ethernet.dstAddr;
         meta.ethernet.srcAddr = hdr.ethernet.srcAddr;
         meta.ethernet.etherType = hdr.ethernet.etherType;
+
+        // this is for decrement ttl
+        // 2: check packet is an IPv4 packet
+        if (hdr.ethernet.etherType == 0x0800) {
+            // extract the IPv4 header fields from the packet and store them in the hdr.ipv4 struct. This makes the IPv4 header fields available for processing in the P4 program.
+            extract(hdr.ipv4);
+        }
+
         // we transition to the accept state to indicate that the parser has successfully parsed the Ethernet header.
         transition accept;
     }
@@ -100,6 +110,16 @@ control MyIngress(inout headers hdr,
             modify_field(hdr.ethernet.srcAddr, standard_metadata.ingress_port);
             //  Q: OR :  hdr.ethernet.srcAddr = standard_metadata.ingress_port; // Update source MAC address
         }
+
+         // 2: decrements the ttl field in the IPv4 header by 1. 
+         // Check if TTL is greater than 0
+         if (hdr.ipv4.ttl > 0) {
+            // Decrement TTL by 1
+            hdr.ipv4.ttl -= 1;
+         } else {
+            // Drop packet if TTL is 0
+            drop();
+         }
     }
 
     table ipv4_lpm {
@@ -123,7 +143,7 @@ control MyIngress(inout headers hdr,
          DONE
          */
 
-        if (hdr.ipv4.isValid() && hdr.ipv4.protocol == TYPE_IPV4) {
+        if (hdr.ipv4.isValid() && hdr.ipv4.protocol == TYPE_IPV4) { // OR hdr.ethernet.etherType == 0x0800
             ipv4_lpm.apply();
         } else {
             drop();
@@ -176,6 +196,12 @@ control MyDeparser(packet_out packet, in headers hdr) {
         
         // Deparse Ethernet header
         deparse(hdr.ethernet);
+
+
+        //2: Deparse IPv4 header
+        if (hdr.ipv4.isValid()) {
+            deparse(hdr.ipv4);
+        }
     }
 }
 
