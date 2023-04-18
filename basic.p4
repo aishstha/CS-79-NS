@@ -105,10 +105,20 @@ control MyIngress(inout headers hdr,
             /* Next hop is not known, drop the packet */
             drop();
         } else {
+	    // update the ethernet destination address with the address of the next hop
             modify_field(hdr.ethernet.dstAddr, dstAddr);
-            // updates the source MAC address in the Ethernet header to the MAC address of the ingress port
-            modify_field(hdr.ethernet.srcAddr, standard_metadata.ingress_port);
+            
+	    // updates the source MAC address in the Ethernet header to the MAC address of the egress port
+            // modify_field(hdr.ethernet.srcAddr, standard_metadata.ingress_port);
             //  Q: OR :  hdr.ethernet.srcAddr = standard_metadata.ingress_port; // Update source MAC address
+            // q:     modify_field(hdr.ethernet.srcAddr, switch_mac_address);
+            
+
+            // update the ethernet source address with the address of the switch
+            modify_field(hdr.ethernet.srcAddr, switch_mac_address);
+
+            // set the egress port for the next hop
+            modify_field(standard_metadata.egress_spec, port);
         }
 
          // 2: decrements the ttl field in the IPv4 header by 1. 
