@@ -2,7 +2,9 @@
 #include <core.p4>
 #include <v1model.p4>
 
+const bit<8>  TCP_PROTOCOL = 0x06;
 const bit<16> TYPE_IPV4 = 0x800;
+const bit<19> ECN_THRESHOLD = 10;
 
 /*************************************************************************
 *********************** H E A D E R S  ***********************************
@@ -18,10 +20,14 @@ header ethernet_t {
     bit<16>   etherType;
 }
 
+/*
+ * DONE: split tos to two fields 6 bit diffserv and 2 bit ecn
+ */
 header ipv4_t {
     bit<4>    version;
     bit<4>    ihl;
-    bit<8>    diffserv;
+    bit<6>    diffserv;
+    bit<2>    ecn;
     bit<16>   totalLen;
     bit<16>   identification;
     bit<3>    flags;
@@ -34,7 +40,6 @@ header ipv4_t {
 }
 
 struct metadata {
-    /* empty */
 }
 
 struct headers {
@@ -47,20 +52,16 @@ struct headers {
 *************************************************************************/
 
 parser MyParser(packet_in packet,
-                out headers hdr,
-                inout metadata meta,
-                inout standard_metadata_t standard_metadata) {
+                  out headers hdr,
+                  inout metadata meta,
+                  inout standard_metadata_t standard_metadata) {
 
     state start {
-        /* DONE: add parser logic */
-        transition ethernet_parser;
+        transition parse_ethernet;
     }
 
-    state ethernet_parser {
-        // Parse the Ethernet header from the packet_in input parameter into the hdr.ethernet header.
+    state parse_ethernet {
         packet.extract(hdr.ethernet);
-
-        // Transitioned in a protocol parser based on the value of the Ethernet type field in a network packet's header.
         transition select(hdr.ethernet.etherType) {
             TYPE_IPV4: parse_ipv4;
             default: accept;
@@ -68,11 +69,7 @@ parser MyParser(packet_in packet,
     }
 
     state parse_ipv4 {
-        // Extracted the IPv4 header fields from the packet and store them in the hdr.ipv4 struct. 
-        // This makes the IPv4 header fields available for processing in the P4 program.
         packet.extract(hdr.ipv4);
-
-        // Transition to the accept state to indicate that the parser has successfully parsed the Ethernet header.
         transition accept;
     }
 }
@@ -99,21 +96,12 @@ control MyIngress(inout headers hdr,
     }
     
     action ipv4_forward(macAddr_t dstAddr, egressSpec_t port) {
-        /* DONE: fill out code in action body */
-        
-        // i. Set the egress port for the next hop
         standard_metadata.egress_spec = port;
-
-        // iii. Update the ethernet source address 
         hdr.ethernet.srcAddr = hdr.ethernet.dstAddr;
-        
-        // ii. Update the ethernet destination address with the address of the next hop.
         hdr.ethernet.dstAddr = dstAddr;
-
-        // iv: Decrements the ttl field in the IPv4 header by 1. 
         hdr.ipv4.ttl = hdr.ipv4.ttl - 1;
     }
-    
+
     table ipv4_lpm {
         key = {
             hdr.ipv4.dstAddr: lpm;
@@ -124,14 +112,10 @@ control MyIngress(inout headers hdr,
             NoAction;
         }
         size = 1024;
-        default_action = drop();
+        default_action = NoAction();
     }
     
-    /* Forward the packet */
     apply {
-        /* DONE: fix ingress control logic
-         *  - ipv4_lpm should be applied only when IPv4 header is valid
-         */
         if (hdr.ipv4.isValid()) {
             ipv4_lpm.apply();
         }
@@ -145,7 +129,26 @@ control MyIngress(inout headers hdr,
 control MyEgress(inout headers hdr,
                  inout metadata meta,
                  inout standard_metadata_t standard_metadata) {
-    apply {  }
+    /*
+    * Defined an action called set_ecn(), which sets the ECN field of an IPv4 header to the value of 3.
+    * ECN bits are set to 1 (11 in binary), indicating that the network is experiencing severe congestion.
+    */
+    action set_ecn() {
+        hdr.ipv4.ecn = 3;
+    }
+    apply {
+        /*
+         * DONE:
+         * - if ecn is 1 or 2
+         *   - compare standard_metadata.enq_qdepth with threshold 
+         *     and set hdr.ipv4.ecn to 3 if larger
+         */
+        if (hdr.ipv4.ecn == 1 || hdr.ipv4.ecn == 2){
+            if (standard_metadata.enq_qdepth >= ECN_THRESHOLD){
+                set_ecn();
+            }
+        }
+    }
 }
 
 /*************************************************************************
@@ -153,12 +156,14 @@ control MyEgress(inout headers hdr,
 *************************************************************************/
 
 control MyComputeChecksum(inout headers hdr, inout metadata meta) {
-     apply {
+    apply {
+        /* DONE: replace tos with diffserve and ecn */
 	update_checksum(
 	    hdr.ipv4.isValid(),
             { hdr.ipv4.version,
-	          hdr.ipv4.ihl,
+              hdr.ipv4.ihl,
               hdr.ipv4.diffserv,
+              hdr.ipv4.ecn,
               hdr.ipv4.totalLen,
               hdr.ipv4.identification,
               hdr.ipv4.flags,
@@ -172,14 +177,12 @@ control MyComputeChecksum(inout headers hdr, inout metadata meta) {
     }
 }
 
-
 /*************************************************************************
 ***********************  D E P A R S E R  *******************************
 *************************************************************************/
 
 control MyDeparser(packet_out packet, in headers hdr) {
     apply {
-        /* DONE: add deparser logic */
         packet.emit(hdr.ethernet);
         packet.emit(hdr.ipv4);
     }
