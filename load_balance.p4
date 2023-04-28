@@ -99,21 +99,20 @@ control MyIngress(inout headers hdr,
                   inout standard_metadata_t standard_metadata) {
 
     action drop() {
-        mark_to_drop(standard_metadata);
+        mark_to_drop();
     }
-    action mark_ecmp(bit<16> ecmp_base, bit<32> ecmp_count) {
-        /* DONE: hash on 5-tuple and save the hash result in meta.ecmp_select 
+    action set_ecmp_select(bit<16> ecmp_base, bit<32> ecmp_count) {
+        /* TODO: hash on 5-tuple and save the hash result in meta.ecmp_select 
            so that the ecmp_nhop table can use it to make a forwarding decision accordingly */
 
         hash(meta.ecmp_select,
-            ecmp_base,
             HashAlgorithm.crc16,
+            ecmp_base,
             { hdr.ipv4.srcAddr,
-                hdr.tcp.srcPort,
-                hdr.tcp.dstPort,
-                hdr.ipv4.dstAddr,
-                hdr.ipv4.protocol,
-            },
+              hdr.ipv4.dstAddr,
+              hdr.ipv4.protocol,
+              hdr.tcp.srcPort,
+              hdr.tcp.dstPort },
             ecmp_count);
     }
     action set_nhop(bit<48> nhop_dmac, bit<32> nhop_ipv4, bit<9> port) {
@@ -128,7 +127,7 @@ control MyIngress(inout headers hdr,
         }
         actions = {
             drop;
-            mark_ecmp;
+            set_ecmp_select;
         }
         size = 1024;
     }
@@ -162,7 +161,7 @@ control MyEgress(inout headers hdr,
         hdr.ethernet.srcAddr = smac;
     }
     action drop() {
-        mark_to_drop(standard_metadata);
+        mark_to_drop();
     }
     table send_frame {
         key = {
@@ -188,7 +187,7 @@ control MyComputeChecksum(inout headers hdr, inout metadata meta) {
 	update_checksum(
 	    hdr.ipv4.isValid(),
             { hdr.ipv4.version,
-	      hdr.ipv4.ihl,
+	          hdr.ipv4.ihl,
               hdr.ipv4.diffserv,
               hdr.ipv4.totalLen,
               hdr.ipv4.identification,
